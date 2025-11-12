@@ -1,0 +1,328 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+</script>
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Micro:bit 戰鬥機避障遊戲 (加速度計控制)</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #f0f0f0; }
+        #gameArea { position: relative; width: 400px; height: 400px; margin: 20px auto; background: #eee; border: 2px solid #333; overflow: hidden; }
+        #car { position: absolute; width: 50px; height: 50px; background: url('https://png.pngtree.com/png-clipart/20211010/original/pngtree-air-force-fighter-cartoon-black-png-image_6850953.png') no-repeat center center; background-size: contain; transition: all 0.1s ease; left: 175px; top: 185px; }
+        .obstacle { position: absolute; width: 20px; height: 20px; background: blue; border-radius: 50%; }
+        .bullet { position: absolute; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid red; }
+        button { padding: 10px 20px; margin: 10px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+        button:hover { background: #45a049; }
+        #status { color: blue; margin: 10px; }
+        #score { font-size: 20px; margin: 10px; }
+        #gameOver { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 30px; color: red; display: none; }
+    </style>
+</head>
+<body>
+    <h1>Micro:bit 戰鬥機避障遊戲 (加速度計控制)</h1>
+    <p>連接 micro:bit 後，傾斜 micro:bit 控制戰鬥機左右前後移動避開障礙物，按按鈕發射子彈！</p>
+
+    <!-- 遊戲區域 -->
+    <div id="gameArea">
+        <div id="car"></div>
+        <div id="gameOver">Game Over!</div>
+    </div>
+
+    <!-- 計分 -->
+    <div id="score">分數: 0</div>
+
+    <!-- 控制按鈕 -->
+    <button onclick="toggleGame()">開始/停止遊戲</button>
+    <button id="connectBtn" onclick="connectMicrobit()">連接 micro:bit</button>
+    <button id="disconnectBtn" onclick="disconnectMicrobit()" disabled>斷開連接</button>
+    <div id="status">狀態：未連接</div>
+
+    <script>
+        // Web Bluetooth UART UUIDs
+        const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const UART_TX_CHARACTERISTIC_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+        const UART_RX_CHARACTERISTIC_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+        let device, server, service, txCharacteristic, rxCharacteristic;
+        let car = { x: 175, y: 185, dx: 0, dy: 0, maxSpeed: 10 }; // 戰鬥機狀態
+        let obstacles = [];
+        let bullets = [];
+        let gameRunning = false;
+        let score = 0;
+        let gameOver = false;
+
+        const gameArea = document.getElementById('gameArea');
+        const carEl = document.getElementById('car');
+        const gameOverEl = document.getElementById('gameOver');
+        const statusEl = document.getElementById('status');
+        const scoreEl = document.getElementById('score');
+
+        // 連接 micro:bit
+        async function connectMicrobit() {
+            try {
+                statusEl.textContent = '搜尋 micro:bit...';
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'BBC micro:bit' }],
+                    optionalServices: [UART_SERVICE_UUID]
+                });
+                server = await device.gatt.connect();
+                service = await server.getPrimaryService(UART_SERVICE_UUID);
+                txCharacteristic = await service.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
+                txCharacteristic.startNotifications();
+                txCharacteristic.addEventListener('characteristicvaluechanged', handleReceivedData);
+                rxCharacteristic = await service.getCharacteristic(UART_RX_CHARACTERISTIC_UUID);
+
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                statusEl.textContent = '已連接 micro:bit';
+            } catch (error) {
+                statusEl.textContent = `連接失敗: ${error.message}`;
+            }
+        }
+
+        // 斷開連接
+        function disconnectMicrobit() {
+            if (device && device.gatt.connected) {
+                device.gatt.disconnect();
+                statusEl.textContent = '已斷開連接';
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+            }
+        }
+
+        // 處理接收數據
+        function handleReceivedData(event) {
+            let receivedData = new Uint8Array(event.target.value.buffer);
+            let receivedString = new TextDecoder().decode(receivedData).trim();
+            if (receivedString.includes('+')) {
+                let [xStr, yStr] = receivedString.split('+');
+                let x = parseInt(xStr);
+                let y = parseInt(yStr);
+                if (!isNaN(x) && !isNaN(y)) {
+                    statusEl.textContent = `收到座標: X=${x}, Y=${y}`;
+                    moveCar(x, y);
+                }
+            } else if (receivedString === 'shoot') {
+                shootBullet();
+                statusEl.textContent = '發射子彈！';
+            }
+        }
+
+        // 根據 X,Y 座標移動戰鬥機
+        function moveCar(x, y) {
+            if (Math.abs(x) < 100) {
+                car.dx = 0;
+            } else {
+                car.dx = (x / 1024) * car.maxSpeed; // X 正: 右, 負: 左
+            }
+            if (Math.abs(y) < 100) {
+                car.dy = 0;
+            } else {
+                car.dy = (y / 1024) * car.maxSpeed; // Y 正: 下 (後), 負: 上 (前)
+            }
+        }
+
+        // 發射子彈
+        function shootBullet() {
+            if (gameRunning && !gameOver) {
+                let bullet = {
+                    x: car.x + 22.5, // 從戰鬥機中心發射
+                    y: car.y - 10,   // 子彈從戰鬥機上方發出
+                    speed: -5,       // 向上移動
+                    el: document.createElement('div')
+                };
+                bullet.el.className = 'bullet';
+                bullet.el.style.left = bullet.x + 'px';
+                bullet.el.style.top = bullet.y + 'px';
+                gameArea.appendChild(bullet.el);
+                bullets.push(bullet);
+            }
+        }
+
+        // 切換遊戲狀態
+        function toggleGame() {
+            gameRunning = !gameRunning;
+            gameOver = false;
+            gameOverEl.style.display = 'none';
+            if (gameRunning) {
+                score = 0;
+                updateScore();
+                obstacles.forEach(obs => obs.el.remove());
+                bullets.forEach(bullet => bullet.el.remove());
+                obstacles = [];
+                bullets = [];
+                statusEl.textContent = '遊戲開始！傾斜 micro:bit 控制戰鬥機';
+            } else {
+                statusEl.textContent = '遊戲暫停';
+            }
+        }
+
+        // 更新戰鬥機位置
+        function updateCarPosition() {
+            car.x += car.dx;
+            car.y += car.dy;
+            if (car.x < 0) car.x = 0;
+            if (car.x > 350) car.x = 350;
+            if (car.y < 0) car.y = 0;
+            if (car.y > 350) car.y = 350; // 調整以適應戰鬥機圖片大小
+            carEl.style.left = car.x + 'px';
+            carEl.style.top = car.y + 'px';
+        }
+
+        // 生成障礙物
+        function createObstacle() {
+            if (gameRunning && !gameOver) {
+                let obs = { x: Math.random() * 380, y: 0, speed: 3, el: document.createElement('div') };
+                obs.el.className = 'obstacle';
+                obs.el.style.left = obs.x + 'px';
+                obs.el.style.top = obs.y + 'px';
+                gameArea.appendChild(obs.el);
+                obstacles.push(obs);
+            }
+        }
+
+        // 更新子彈和碰撞檢測
+        function updateBullets() {
+            if (gameRunning && !gameOver) {
+                bullets.forEach((bullet, bulletIndex) => {
+                    bullet.y += bullet.speed;
+                    bullet.el.style.top = bullet.y + 'px';
+                    if (bullet.y < 0) {
+                        bullet.el.remove();
+                        bullets.splice(bulletIndex, 1);
+                        return;
+                    }
+                    // 子彈與障礙物碰撞檢測
+                    obstacles.forEach((obs, obsIndex) => {
+                        if (bullet.y < obs.y + 20 && bullet.y + 10 > obs.y &&
+                            bullet.x < obs.x + 20 && bullet.x + 10 > obs.x) {
+                            bullet.el.remove();
+                            obs.el.remove();
+                            bullets.splice(bulletIndex, 1);
+                            obstacles.splice(obsIndex, 1);
+                            score += 5; // 擊中障礙物得 5 分
+                            updateScore();
+                        }
+                    });
+                });
+            }
+        }
+
+        // 更新障礙物和碰撞檢測
+        function updateObstacles() {
+            if (gameRunning && !gameOver) {
+                obstacles.forEach((obs, index) => {
+                    obs.y += obs.speed;
+                    obs.el.style.top = obs.y + 'px';
+                    if (obs.y > 400) {
+                        obs.el.remove();
+                        obstacles.splice(index, 1);
+                        score++;
+                        updateScore();
+                    }
+                    // 戰鬥機與障礙物碰撞檢測
+                    if (obs.y + 20 > car.y && obs.y < car.y + 50 && obs.x + 20 > car.x && obs.x < car.x + 50) {
+                        gameOver = true;
+                        gameRunning = false;
+                        gameOverEl.style.display = 'block';
+                        statusEl.textContent = `遊戲結束！最終分數: ${score}`;
+                    }
+                });
+            }
+        }
+
+        // 更新分數
+        function updateScore() {
+            scoreEl.textContent = `分數: ${score}`;
+        }
+
+        // 遊戲迴圈 (每 50ms 更新)
+        setInterval(() => {
+            updateCarPosition();
+            updateObstacles();
+            updateBullets();
+        }, 50);
+
+        // 每 1000ms 生成障礙物
+        setInterval(createObstacle, 1000);
+    </script>
+</body>
+</html>
